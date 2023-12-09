@@ -140,7 +140,7 @@ class Machinegun(Weapon):
         bullet_pos = self.get_abs_pos() + shoot_dir * bullet_size * 1.5
         bullet_vel = self.parent.vel + shoot_dir * self.muzzle_vel
         bullet_accel = np.array([0,0,0])
-        bullet_orient = self.create_bullet_orientation(shoot_dir)
+        bullet_orient = np.array([[1,0,0],[0,1,0],[0,0,1]]) # self.create_bullet_orientation(shoot_dir)
         bullet_ang_vel = np.array([0,0,0])
         bullet_ang_accel = np.array([0,0,0])
         bullet_mass = 0.05
@@ -170,3 +170,93 @@ class Machinegun(Weapon):
 
     def set_target(self, ntarget):
         self.target = ntarget
+
+class Silo(Weapon):
+    def __init__(self, parent, rel_pos, rel_dir, launch_vel, boost_delay,
+                 reload_time, num_missiles, sound_channel):
+        self.parent = parent
+        self.rel_pos = rel_pos
+        self.rel_dir = rel_dir
+        self.launch_vel = launch_vel
+        self.boost_delay = boost_delay
+        self.reload_time = reload_time
+        self.num_missiles = num_missiles
+        self.sound_channel = sound_channel
+        
+        self.reload_countdown = 0
+        self.sound = "silo_launch"
+        self.target = None
+
+    def set_target(self, ntarget):
+        self.target = ntarget
+
+    def get_abs_launch_dir(self):
+        parent_x = self.parent.orient[0]
+        parent_y = self.parent.orient[1]
+        parent_z = self.parent.orient[2]
+
+        return parent_x * self.rel_dir[0] + parent_y * self.rel_dir[1] + parent_z * self.rel_dir[2]
+
+    def get_abs_pos(self):
+        dp = np.array([self.parent.orient[0][0] * self.rel_pos[0] + self.parent.orient[1][0] * self.rel_pos[1] + self.parent.orient[2][0] * self.rel_pos[2],
+                       self.parent.orient[0][1] * self.rel_pos[0] + self.parent.orient[1][1] * self.rel_pos[1] + self.parent.orient[2][1] * self.rel_pos[2],
+                       self.parent.orient[0][2] * self.rel_pos[0] + self.parent.orient[1][2] * self.rel_pos[1] + self.parent.orient[2][2] * self.rel_pos[2]])
+        return self.parent.pos + dp #np.dot(self.parent.orient, self.rel_pos)
+
+    def create_missile_orientation(self, direction):
+        if direction[0] != 0 or direction[1] != 0:
+            perpendicular = np.array([-direction[1], direction[0], 0])
+        else:
+            perpendicular = np.array([1, 0, 0])
+
+        perpendicular /= np.linalg.norm(perpendicular)
+        up = np.cross(direction, perpendicular)
+
+        matrix = np.column_stack((perpendicular, up, direction))
+        return matrix
+
+    def get_rotational_vel(self):
+        return -np.cross(self.parent.ang_vel, self.get_abs_pos() - self.parent.pos)
+
+    def shoot(self, objects):
+        if self.reload_countdown > 0 or self.num_missiles <= 0:
+            return
+
+        launch_dir = self.get_abs_launch_dir()
+        self.num_missiles -= 1
+        self.reload_countdown = self.reload_time
+
+        missile_model = Model("missile")
+        missile_CoM = np.array([0, 0, 0])
+        missile_pos = self.get_abs_pos() + launch_dir
+        missile_vel = self.parent.vel + launch_dir * self.launch_vel + self.get_rotational_vel()
+        missile_accel = np.array([0, 0, 0])
+        missile_orient = self.parent.orient
+        missile_ang_vel = self.parent.ang_vel
+        missile_ang_accel = np.array([0, 0, 0])
+        missile_mass = 100
+        missile_inertia = np.array([[500, 0, 0],
+                                   [0, 500, 0],
+                                   [0, 0, 500]])
+        missile_max_thrust = missile_mass * 9.81 * 5
+        missile_throttle_range = [0, 100]
+        missile_throttle = 0
+        missile_prop_mass = 60
+        missile_mass_flow = 3
+        missile_target = self.target
+        missile_boost_delay = self.boost_delay
+
+        new_missile = Missile(missile_model, missile_CoM, missile_pos, missile_vel, missile_accel,
+                    missile_orient, missile_ang_vel, missile_ang_accel, missile_mass,
+                    missile_inertia, missile_max_thrust, missile_throttle_range, missile_throttle,
+                    missile_prop_mass, missile_mass_flow, missile_target, missile_boost_delay)
+
+        objects.append(new_missile)
+        play_sfx(self.sound, 0, self.sound_channel, 0.3)
+
+    def update(self, dt):
+        if self.reload_countdown > 0:
+            self.reload_countdown -= dt
+
+        if self.reload_countdown < 0:
+            self.reload_countdown = 0

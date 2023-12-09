@@ -72,7 +72,7 @@ class RigidBody:
 
 class Missile(RigidBody):
     def __init__(self, model, CoM, pos, vel, accel, orient, ang_vel, ang_accel, mass, inertia,
-                 max_thrust, throttle_range, throttle, prop_mass, mass_flow, target=None):
+                 max_thrust, throttle_range, throttle, prop_mass, mass_flow, target=None, boost_delay=0):
         super(Missile, self).__init__(model, CoM, pos, vel, accel, orient, ang_vel, ang_accel, mass, inertia)
         self.max_thrust = max_thrust
         self.throttle_range = throttle_range
@@ -80,11 +80,16 @@ class Missile(RigidBody):
         self.prop_mass = prop_mass
         self.mass_flow = mass_flow
         self.target = target
+        self.boost_delay = boost_delay
 
         self.thrust = self.throttle / 100 * self.max_thrust
+        self.timer = 0
+        
+        self.ve = self.max_thrust / self.mass_flow
 
     def drain_fuel(self, dt):
         self.update_mass(-self.mass_flow * self.throttle / 100, dt)
+        self.prop_mass -= self.mass_flow * self.throttle / 100 * dt
 
     def apply_thrust(self):
         if self.prop_mass <= 0:
@@ -103,6 +108,50 @@ class Missile(RigidBody):
             self.throttle = 0
             self.thrust = 0
 
+    def GNC(self, dt):
+        self.timer += dt
+        if not self.target:
+            return
+
+        # -- start boost phase
+        if self.throttle == 0 and self.prop_mass > 0:
+            if self.timer > self.boost_delay:
+                self.set_thrust_percent(100)
+
+        if self.prop_mass <= 0 and self.throttle > 0:
+            self.set_thrust_percent(0)
+
+        delta_v = self.ve * np.log(self.mass / (self.mass - self.prop_mass))
+        approx_flight_speed = np.linalg.norm(np.dot(self.vel - self.target.vel, (self.target.pos - self.pos)/np.linalg.norm(self.pos - self.target.pos))) + delta_v
+        approx_flight_time = np.linalg.norm(self.pos - self.target.pos) / approx_flight_speed
+
+        if approx_flight_time > 3:
+            aimpoint = self.target.pos + self.target.vel * approx_flight_time
+        else:
+            aimpoint = self.target.pos + self.target.vel * np.linalg.norm(self.pos - self.target.pos) / np.linalg.norm(self.vel - self.target.vel)
+        aim_vec = aimpoint - self.pos
+        aim_dir = aim_vec / np.linalg.norm(aim_vec)
+
+        self_vel_mag = np.linalg.norm(self.vel)
+        if self_vel_mag:
+            vel_dir = self.vel / self_vel_mag
+        else:
+            vel_dir = np.array([0, 0, 0])
+
+        required_vec = 3 * aim_dir - vel_dir
+        required_dir = required_vec / np.linalg.norm(required_vec)
+        required_ang_vel_mag = np.linalg.norm(aim_dir - vel_dir)
+
+        current_ang_vel_mag = np.linalg.norm(self.ang_vel)
+        if current_ang_vel_mag:
+            required_ang_vel_axis = np.cross(aim_dir, vel_dir) - self.ang_vel / current_ang_vel_mag
+        else:
+            required_ang_vel_axis = np.cross(aim_dir, vel_dir)
+            
+        required_ang_vel = required_ang_vel_axis * required_ang_vel_mag * np.linalg.norm(self.vel - self.target.vel) * 0.5
+        required_ang_accel = required_ang_vel - self.ang_vel
+        self.apply_torque(required_ang_accel * 1000)
+
 class Ship(RigidBody):
     def __init__(self, model, CoM, pos, vel, accel, orient, ang_vel, ang_accel, mass, inertia,
                  max_thrust, throttle_range, throttle, prop_mass, mass_flow, cy_h, cy_r):
@@ -116,6 +165,7 @@ class Ship(RigidBody):
         self.cy_r = cy_r
 
         self.thrust = self.throttle / 100 * self.max_thrust
+        self.target = None
 
     def drain_fuel(self, dt):
         self.update_mass(-self.mass_flow * self.throttle / 100, dt)
@@ -140,14 +190,12 @@ class Ship(RigidBody):
     def shoot(self, weapon_index):
         self.weapons[weapon_index].shoot()
 
-    def set_target(self, ntarget, tweapons=None):
-        if not tweapons:
-            for w in self.weapons:
-                w.set_target(ntarget)
+    def set_target(self, ntarget):
+        for w in self.weapons:
+            w.set_target(ntarget)
 
-        else:
-            for tw in tweapons:
-                self.weapons[tw].set_target(ntarget)
+        for w in self.weapons_secondary:
+            w.set_target(ntarget)
 
 class Bullet(RigidBody):
     def __init__(self, model, CoM, pos, vel, accel, orient, ang_vel, ang_accel, mass, inertia,

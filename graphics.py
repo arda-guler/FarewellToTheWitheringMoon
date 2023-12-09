@@ -245,4 +245,6 @@ def drawScene(cam, player, objects, stars):
                 drawModel(o.model, o.pos, o.orient, 1, Color(1, 0, 0))
             elif isinstance(o, Bullet):
                 drawPoint(o, Color(1, 1, 1))
+            elif isinstance(o, Missile):
+                drawModel(o.model, o.pos, o.orient, 1, Color(1, 0, 1))
 

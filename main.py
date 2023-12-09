@@ -76,10 +76,14 @@ def main():
     player_MG4 = Machinegun(player, np.array([-25, 0, -100]),
                              1000, 0.12, 10000, 5)
 
+    player_MS1 = Silo(player, np.array([0, 25, 0]), np.array([0, 1.0, 0]),
+                      5, 1, 10, 10, 6)
+
     player.weapons = [player_MG1, player_MG2, player_MG3, player_MG4]
+    player.weapons_secondary = [player_MS1]
 
     enemy = Ship(player_model, player_CoM,
-                 player_pos + np.array([100, 50, 10e3]), np.array([0, 0, -50]), player_accel,
+                 player_pos + np.array([00, 0, 5e3]), np.array([0, 0, 0]), player_accel,
                  player_orient, player_ang_vel, player_ang_accel,
                  player_mass, player_inertia,
                  player_max_thrust, player_throttle_range, player_throttle,
@@ -147,8 +151,10 @@ def main():
     player_throttle_dn = "F"
     cam_move_speed = 10
 
-    player_shoot = "Space"
-    play_bgm("Combat")
+    player_shoot = "Z"
+    player_shoot_secondary = "X"
+    player_target_next = "T"
+    # play_bgm("Combat")
 
     print("Starting...")
     print("= = = = = =\n")
@@ -169,9 +175,9 @@ def main():
         if kbd.is_pressed(cam_yaw_right):
             rotate_cam([0, -cam_rot_speed * dt, 0])
         if kbd.is_pressed(cam_roll_cw):
-            rotate_cam([0, 0, cam_rot_speed * dt])
-        if kbd.is_pressed(cam_roll_ccw):
             rotate_cam([0, 0, -cam_rot_speed * dt])
+        if kbd.is_pressed(cam_roll_ccw):
+            rotate_cam([0, 0, cam_rot_speed * dt])
 
         # -- -- player rotation
         if kbd.is_pressed(player_pitch_dn):
@@ -183,9 +189,9 @@ def main():
         if kbd.is_pressed(player_yaw_left):
             player.apply_torque(np.array([0, -4000, 0]))
         if kbd.is_pressed(player_roll_ccw):
-            player.apply_torque(np.array([0, 0, -12000]))
-        if kbd.is_pressed(player_roll_cw):
             player.apply_torque(np.array([0, 0, 12000]))
+        if kbd.is_pressed(player_roll_cw):
+            player.apply_torque(np.array([0, 0, -12000]))
 
         # -- -- player translation
         if kbd.is_pressed(player_throttle_up):
@@ -198,23 +204,35 @@ def main():
             for w in player.weapons:
                 w.shoot(objects)
 
+        if kbd.is_pressed(player_shoot_secondary):
+            for w in player.weapons_secondary:
+                w.shoot(objects)
+
         # PHYSICS
         player.apply_thrust()
         player.drain_fuel(dt)
         player.update(dt)
 
-        for pw in player.weapons:
+        for pw in player.weapons + player.weapons_secondary:
             pw.update(dt)
 
         for o in objects:
-            o.update(dt)
-
             if isinstance(o, Bullet):
                 o.update_timer(objects, dt)
                 collider = o.check_collision(objects)
+                o.update(dt)
                 if collider:
                     objects.remove(o)
                     del o
+
+            elif isinstance(o, Missile):
+                o.GNC(dt)
+                o.apply_thrust()
+                o.drain_fuel(dt)
+                o.update(dt)
+
+            elif isinstance(o, Ship):
+                o.update(dt)
 
         main_cam.move_with_lock()
                 
@@ -229,9 +247,11 @@ def main():
         render_AN(vel_text, Color(0,0,1), [-10, 6], main_cam)
 
         proj_text = ""
-        for w in player.weapons:
+        for w in player.weapons + player.weapons_secondary:
             if isinstance(w, Machinegun):
                 proj_text += str(w.num_projectiles) + "\n"
+            elif isinstance(w, Silo):
+                proj_text += str(w.num_missiles) + "\n"
 
         render_AN(proj_text, Color(1,0,0), [-10, 5.5], main_cam, font_size=0.05)
         
